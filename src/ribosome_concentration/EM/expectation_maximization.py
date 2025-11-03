@@ -4,7 +4,6 @@ from scipy.special import factorial
 import einops 
 import matplotlib.pyplot as plt 
 import starfile
-from ribosome_concentration.cytosol_segmentation.rough_cytoplasm_segmentation import read_tomogram, analyse_tomogram, rescale_star_coordinates
 import pandas as pd
 from tqdm import tqdm
 import napari
@@ -12,15 +11,6 @@ from ribosome_concentration.input.input import read_tomogram, rescale_star_coord
 
 
 rng = np.random.default_rng(42)
-
-def read_star_file(path: str) -> pd.DataFrame:
-    star = starfile.read(path)
-
-    if type(star) is dict:
-        star = star['particles']
-
-    return star
-
 
 def create_synthetic_tomogram(reconstruction_dims=(30, 58, 41), slab_height=(10, 58, 41)):
     synthetic_tomogram = np.zeros(reconstruction_dims)
