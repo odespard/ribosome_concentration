@@ -1,5 +1,7 @@
 import os
 import mrcfile
+import pandas as pd
+import starfile
 
 def read_tomogram(path):
     if os.path.exists(path):
