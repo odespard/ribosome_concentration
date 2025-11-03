@@ -1,0 +1,21 @@
+[project]
+name = "ribosome_concentration"
+version = "0.0.1"
+authors = [
+  { name="Oscar Despard", email="odespard@mrc-lmb.cam.ac.uk" },
+]
+description = "A package for estimating ribosome concentration in tomograms."
+readme = "README.md"
+requires-python = ">=3.11"
+
+dynamic = ["dependencies"]
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[project.scripts]
+"ribosome_concentration" = "ribosome_concentration.main:app"
+
+[build-system]
+requires = [
+    "setuptools>=60",
+    "setuptools-scm>=8.0"]
