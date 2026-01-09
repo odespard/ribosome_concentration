@@ -7,17 +7,18 @@ import starfile
 import pandas as pd
 from tqdm import tqdm
 import napari
-from ribosome_concentration.input.input import read_tomogram, rescale_star_coordinates
+from ribosome_concentration.input.input import read_tomogram, rescale_star_coordinates, read_star_file
 
 
 rng = np.random.default_rng(42)
 
-def create_synthetic_tomogram(reconstruction_dims=(30, 58, 41), slab_height=(10, 58, 41)):
+def create_synthetic_tomogram(reconstruction_dims=(30, 58, 41), slab_height=(10, 58, 41), probability=1e-3):
     synthetic_tomogram = np.zeros(reconstruction_dims)
     z_start = reconstruction_dims[0] // 2 - slab_height[0] // 2
     z_end = z_start + slab_height[0]
-    synthetic_tomogram[z_start:z_end, :, :] = rng.choice((0, 1), size=slab_height, p=(0.90, 0.1))
-    return synthetic_tomogram, z_start, z_end
+    synthetic_tomogram[z_start:z_end, :, :] = rng.choice((0, 1), size=slab_height, p=(1-probability, probability))
+    synthetic_points = np.argwhere(synthetic_tomogram == 1)
+    return synthetic_tomogram, z_start, z_end, synthetic_points
 
 
 def sample_regular_grid(tomogram, R):
@@ -53,7 +54,7 @@ def calculate_expected_likelihood(x_i, T_ji, lambda_j, tau_j):
     return val
 
 
-def em_algorithm(x_i, lambda_j=np.array([1, 0.1]), tau_j=np.array([0.3, 0.7]), max_iterations=1e3, tol=1e-6):
+def em_algorithm(x_i, lambda_j=np.array([1, 0.1]), tau_j=np.array([0.3, 0.7]), max_iterations=1e3, tol=1e-2):
 
     expected_likelihood = []
     for iteration in range(int(max_iterations)):
@@ -140,7 +141,14 @@ def visualize_em_results_per_tomogram(tomogram, rescaled_mat, reg_grid, res, R):
                     properties={'cytosol_probability': res["mixture_probability"][0, :]},
                     name='regular_grid', 
                     face_color='cytosol_probability',
-                    face_colormap='viridis',
+                    face_colormap='BuGn',
                     opacity=0.5,
                     out_of_slice_display=True)
     napari.run()
+
+
+def pois_dist(lam, max=100):
+    arr = np.zeros((max,))
+    for k in range(max):
+        arr[k] = lam**k * np.exp(-lam)/factorial(k)
+    return np.arange(max), arr
