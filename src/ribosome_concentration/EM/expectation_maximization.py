@@ -133,10 +133,14 @@ def convert_to_molar_concentration(lamb, R, tomogram_apx, avogadro_number=6.022e
     return molar_concentration
 
 
-def visualize_em_results_per_tomogram(tomogram, rescaled_mat, reg_grid, res, R):
+def visualize_em_results_per_tomogram(tomogram, rescaled_mat, reg_grid, res, R, mask=None):
     viewer = napari.Viewer()
     viewer.add_image(tomogram, name='tomogram')
     viewer.add_points(rescaled_mat, size=8, name='particles', out_of_slice_display=True)
+    if mask is not None: 
+        if mask.shape[0] != reg_grid.shape[0]:
+            raise ValueError("mask and reg_grid must have the same shape")
+        reg_grid = reg_grid[mask]
     viewer.add_points(reg_grid, size=2 * R, 
                     properties={'cytosol_probability': res["mixture_probability"][0, :]},
                     name='regular_grid', 
