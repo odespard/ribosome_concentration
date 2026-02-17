@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from scipy.spatial import distance_matrix
 
-def subsample_star_file(star: pd.DataFrame, 
+def subsample_star_file(star: pd.DataFrame | np.ndarray, 
                         fractions: None | np.ndarray = None,
                         num_replicates: int = 5):
     if fractions is None:
@@ -15,7 +15,14 @@ def subsample_star_file(star: pd.DataFrame,
     subsampled_fractions = []
     for fraction in fractions:
         for rep in range(num_replicates):
-            frac_sample = star.sample(frac=fraction, random_state=42 + rep).reset_index(drop=True)
+            if type(star) == pd.DataFrame:
+                frac_sample = star.sample(frac=fraction, random_state=42 + rep).reset_index(drop=True)
+            elif type(star) == np.ndarray:
+                rng = np.random.default_rng(seed=42 + rep)
+                frac_sample = star[rng.choice(len(star), int(len(star) * fraction))]
+
+            else:
+                raise TypeError("The variable star must be a numpy array or a pandas dataframe.")
             subsampled_stars.append(frac_sample)
             subsampled_fractions.append(fraction)
 

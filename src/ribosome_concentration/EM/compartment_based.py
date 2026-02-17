@@ -25,20 +25,55 @@ def convert_to_coo_format(coordinates, indices, dat, shape, dilation_factor = 1)
 
 class Tomogram:
     avogadro_number = 6.022e23
-    def __init__(self, data, star_coordinates, tomogram_apx, star_file_apx):
+    def __init__(self, data, star_coordinates, tomogram_apx, star_file_apx, name, save_path = None):
+        self.name = name
         self.tomogram_apx = tomogram_apx
         self.star_file_apx = star_file_apx
         self.particles = rescale_star_coordinates(star_coordinates, tomogram_apx, star_file_apx).T[:, ::-1]
-        self.particles_coo = convert_to_coo_format(self.particles, np.arange(self.particles.shape[0]), np.ones(self.particles.shape[0]), data.shape)
-        self.particles_dense = self.particles_coo.todense()
+
+        self.total_num_particles = self.particles.shape[0]
+
         self.data = data
         self.shape = data.shape
         self.compartment_counts = None
         self.compartment_stdevs = None
         self.forbidden_region = np.zeros(self.shape, dtype=bool)
         self.forbidden_labels = []
+        self.suspect = False
+        if save_path is None:
+            save_path = self.name
+        self.save_path = save_path
 
 
+    @property
+    def particles(self):
+        return self._particles
+
+    @particles.setter
+    def particles(self, value):
+        self._new_particles_value = True
+        self._new_particles_coo_value = True
+        self._particles = value
+
+
+    @property 
+    def particles_coo(self):
+        if self._new_particles_value:
+            print('New particles value detected. Converting. ')
+            self._particles_coo = convert_to_coo_format(self.particles, np.arange(self.particles.shape[0]), np.ones(self.particles.shape[0]), self.data.shape)
+            self._new_particles_value = False
+
+
+        return self._particles_coo 
+    @property
+    def particles_dense(self):
+
+        if self._new_particles_coo_value:
+            self._particles_dense = self.particles_coo.todense()
+            self._new_particles_coo_value = False
+
+        return self._particles_dense
+    
     def compartmentalize(self, compartment_size, centre_separation=None, x_separation=None, y_separation=None, z_separation=None):
         if centre_separation is None:
             centre_separation = compartment_size
@@ -75,7 +110,10 @@ class Tomogram:
                     compartment.is_forbidden = False
 
 
-    def define_void_compartments(self, mixture_probability_threshold=0.5, plot=False):
+    def define_void_compartments(self, mixture_probability_threshold=0.5, 
+                                 hellinger_distance_threshold=0.5, 
+                                 mean_dist_threshold=1, 
+                                 plot=False):
         mu_0_initial, mu_1_initial, sigma_initial = self._define_initial_em_parameters(self.compartment_stdevs)
         self.em_res = em_algorithm(self.compartment_stdevs, 
                      mu_j=np.array([mu_0_initial, mu_1_initial]), 
@@ -84,6 +122,27 @@ class Tomogram:
         
         if plot:
             self._plot_em_result(self.em_res)
+
+
+        hd = hellinger_distance(self.normal_dists[0], self.normal_dists[1], self.em_grid)
+        min_mean_dist = np.min([
+            find_normalized_distance_of_mean(self.normal_dists[0], self.normal_dists[1]),
+            find_normalized_distance_of_mean(self.normal_dists[1], self.normal_dists[0])
+
+        ])
+
+        print('Hellinger distance:', hd)
+        if hd < hellinger_distance_threshold:
+            print(f'Suspect as Hellinger distance below the threshold, {hellinger_distance_threshold}.')
+            self.suspect = True
+
+        print('Minimumum normalised distance of cluster mean:', min_mean_dist)
+        if min_mean_dist < mean_dist_threshold:
+            print(f'Suspect as mean distance below the threshold, {mean_dist_threshold}.')
+            self.suspect = True
+
+        self.hellinger_distance = hd
+        self.norm_min_mean_dist = min_mean_dist
         
 
         self.void_compartments = self.em_res['mixture_probability'][0] > mixture_probability_threshold
@@ -119,20 +178,38 @@ class Tomogram:
         sigma_initial = np.std(arr)
         return mu_0_initial, mu_1_initial, sigma_initial
     
-    def _plot_em_result(self, em_res):
+    def _analyse_em_result(self, em_res):
+        normal_dists = []
+        for i in range(len(em_res['mu'])):
+            normal_dists.append(norm(loc=em_res['mu'][i], scale=em_res['sigma'][i]))
+
+        extent = (np.min([0] + [em_res['mu'][i] - 3 * em_res['sigma'][i] for i in range(len(em_res['mu']))]),
+                  np.max([1.2 * np.max(self.compartment_stdevs)] + [em_res['mu'][i] + 3 * em_res['sigma'][i] for i in range(len(em_res['mu']))])
+                         )
+        em_grid = np.arange(extent[0], extent[1], 0.0001)
 
 
-        n1 = norm(loc=em_res['mu'][0], scale=em_res['sigma'][0])
-        n2 = norm(loc=em_res['mu'][1], scale=em_res['sigma'][1])
+        self.normal_dists = normal_dists
+        self.em_grid = em_grid
 
-        plot_vals = np.arange(0, np.max(self.compartment_stdevs), 0.0001)
-        n1_pdf = n1.pdf(plot_vals)
-        n2_pdf = n2.pdf(plot_vals)
+    def _plot_em_result(self, em_res, save=True, show=False):
 
-        plt.plot(plot_vals, n1_pdf * em_res['tau'][0])
-        plt.plot(plot_vals, n2_pdf * em_res['tau'][1])
-        plt.hist(self.compartment_stdevs, bins=50, density=True)
-        plt.show()
+        self._analyse_em_result(em_res)
+
+        pdfs = [n.pdf(self.em_grid) for n in self.normal_dists]
+
+        fig, ax = plt.subplots()
+
+        for i, pdf in enumerate(pdfs):
+            ax.plot(self.em_grid, pdf * em_res['tau'][i])
+
+            
+        ax.hist(self.compartment_stdevs, bins=50, density=True)
+        if save:
+            plt.savefig(f'{self.save_path}/{self.name}_em_res.png', dpi=300)
+
+        if show:
+            plt.show()
 
     def forbid_empty_compartments(self):
         self.forbidden_labels.append('empty')
@@ -149,10 +226,17 @@ class Tomogram:
             compartment.forbidden_dict = {}
     
 
-    def calculate_ribosome_concentration(self):
+    def calculate_ribosome_concentration(self, reasons_to_forbid=None):
         allowed_mask = np.zeros(self.shape, dtype=bool)
+        if reasons_to_forbid is not None:
+            print("Removing regions in the following classes:", reasons_to_forbid )
+
         for compartment in self.compartments:
-            allowed_mask[compartment.region] = not compartment.is_forbidden
+            if reasons_to_forbid is None:
+                allowed_mask[compartment.region] = not compartment.is_forbidden
+            else:
+
+                allowed_mask[compartment.region] = not np.any([v for k, v in compartment.forbidden_dict.items() if k in reasons_to_forbid])
 
         voxel_volume_nm3 = (self.tomogram_apx * 0.1) ** 3
         voxel_volume_L = voxel_volume_nm3 * 1e-24
@@ -160,6 +244,7 @@ class Tomogram:
         self.number_of_allowed_voxels = np.sum(allowed_mask)
         self.number_of_ribosomes_in_allowed_volume = np.sum(allowed_mask * self.particles_dense)
         self.allowed_volume_L = self.number_of_allowed_voxels * voxel_volume_L
+        self.total_volume = np.ones(self.shape, dtype=bool).sum() * voxel_volume_L
         
         self.ribosome_concentration_molar = self.number_of_ribosomes_in_allowed_volume / self.allowed_volume_L / Tomogram.avogadro_number # in Molar
 
@@ -313,3 +398,18 @@ def em_algorithm(x_i, mu_j=np.array([1, 0.1]), sigma_j=np.array([0.1, 0.1]), tau
     }
 
     return res
+
+
+def hellinger_distance(var1, var2, grid):
+
+    areas = []
+    for var in [var1, var2]:
+        var_area = var.pdf(grid)[:-1] * np.diff(grid)
+        areas.append(var_area)
+
+
+    return 1 - np.sum(np.sqrt(areas[0] *areas[1]))
+
+def find_normalized_distance_of_mean(var1, var2):
+
+    return np.abs(var2.mean() - var1.mean()) / var1.std()
